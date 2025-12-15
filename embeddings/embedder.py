@@ -1,15 +1,55 @@
 """
-Embeddings module for generating vector representations of text.
+Advanced Embeddings Module
+
+This module provides comprehensive embedding generation capabilities
+supporting multiple models and optimized batch processing for the
+Crawl2Answer RAG system.
+
+Features:
+- Multiple embedding models (SentenceTransformers, OpenAI)
+- Batch processing for efficiency
+- Embedding caching and persistence
+- Dimension normalization
+- Error handling and recovery
 """
 
-import openai
 import numpy as np
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any
 import logging
-from sentence_transformers import SentenceTransformer
+from pathlib import Path
+import pickle
+import hashlib
+import time
 import os
+from dataclasses import dataclass
+
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+from config.settings import Settings
+from chunking.chunker import TextChunk
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class EmbeddingResult:
+    """Result of embedding generation"""
+    embedding: List[float]
+    model_name: str
+    dimension: int
+    chunk_id: int
+    text_hash: str
+    generation_time: float
+    metadata: Dict[str, Any]
 
 
 class Embedder:
