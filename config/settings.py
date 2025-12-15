@@ -40,14 +40,31 @@ class Settings:
         # Embedding configuration
         self.EMBEDDING_MODEL_TYPE = os.getenv("EMBEDDING_MODEL_TYPE", "sentence_transformers")
         self.EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+        self.EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "384"))
+        self.EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         
         # Vector database configuration
-        self.VECTOR_DB_PATH = os.getenv("VECTOR_DB_PATH", "data/embeddings")
+        self.VECTOR_DB_PATH = os.getenv("VECTOR_DB_PATH", "data/vector_store")
+        self.VECTOR_DB_INDEX_TYPE = os.getenv("VECTOR_DB_INDEX_TYPE", "cosine")
+        
+        # Make sure we're using the correct path
+        if hasattr(self, 'VECTOR_DB_PATH'):
+            # Force the correct path if somehow it got overridden
+            if self.VECTOR_DB_PATH == "data/embeddings":
+                self.VECTOR_DB_PATH = "data/vector_store"
         
         # Retrieval configuration
         self.RETRIEVAL_K = int(os.getenv("RETRIEVAL_K", "5"))
         self.SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.1"))
+        
+        # Step 6 specific configuration - ensure compatibility with Step 5
+        self.VECTOR_DB_PATH = "data/vector_store"  # Force the correct path
+        
+        # Answer generation configuration
+        self.MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "3000"))
+        self.MAX_ANSWER_TOKENS = int(os.getenv("MAX_ANSWER_TOKENS", "500"))
+        self.MIN_CONTEXT_RELEVANCE = float(os.getenv("MIN_CONTEXT_RELEVANCE", "0.3"))
         
         # Logging configuration
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
