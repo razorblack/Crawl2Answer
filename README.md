@@ -111,6 +111,9 @@ cp .env.example .env  # Edit .env if needed
 ```bash
 # 4. Launch the API server
 python -m uvicorn api.main:app --port 8000 --reload
+
+# Alternative: Use the startup utility (provides better logging)
+python tests/start_api.py
 ```
 
 **Phase 3: Run the Crawler**
@@ -146,25 +149,38 @@ For testing individual components without the API:
 
 ```bash
 # Test Step 1: Web Crawling
-python test_step1_crawling.py
+python tests/test_crawler_simple.py
 
 # Test Step 2: Text Extraction  
-python test_step2_extraction.py
+python tests/test_text_extraction.py
 
 # Test Step 3: Text Chunking
-python test_step3_chunking.py
+python tests/test_chunking_demo.py
 
 # Test Step 4: Embedding Generation
-python test_step4_embeddings.py
+python tests/test_step5_embeddings.py
 
 # Test Step 5: Vector Database
-python test_step5_embeddings.py
+python tests/test_step5_embeddings.py
 
 # Test Step 6: RAG Pipeline
-python test_step6_rag.py
+python tests/test_step6_rag.py
 
 # Test Step 7: API Endpoints
-python test_step7_api.py
+python tests/test_step7_api.py
+
+# Direct API Testing
+python tests/test_api_direct.py
+
+# Full Pipeline Test
+python tests/test_full_pipeline.py
+
+# API Server Utilities
+python tests/start_api.py              # Start API server with logging
+python tests/step7_testing_guide.py    # Manual testing guide with curl commands
+
+# Run All Tests (if pytest is installed)
+pytest tests/ -v                       # Run all tests with verbose output
 ```
 
 ## 📁 Project Structure
@@ -195,6 +211,19 @@ Crawl2Answer/
 │
 ├── config/             # Configuration management
 │   └── settings.py
+│
+├── tests/              # Test files and utilities
+│   ├── test_crawler_simple.py     # Basic crawler testing
+│   ├── test_text_extraction.py    # Text extraction testing
+│   ├── test_chunking_demo.py       # Text chunking testing
+│   ├── test_step5_embeddings.py    # Embedding generation testing
+│   ├── test_step6_rag.py           # RAG pipeline testing
+│   ├── test_step7_api.py           # API endpoint testing
+│   ├── test_api_direct.py          # Direct API testing
+│   ├── test_full_pipeline.py       # Full pipeline integration
+│   ├── start_api.py                # API server startup utility
+│   ├── step7_testing_guide.py      # Manual testing guide
+│   └── __init__.py                 # Python package marker
 │
 ├── data/               # Data storage
 │   ├── raw/           # Raw crawled content
