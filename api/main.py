@@ -38,6 +38,17 @@ retriever = None
 class CrawlRequest(BaseModel):
     url: str
     max_pages: int = 10
+    max_depth: int = 3
+    delay: float = 1.0
+
+
+class CrawlResponse(BaseModel):
+    status: str
+    message: str
+    crawled_pages: int
+    base_domain: str
+    total_content_size: int
+    pages: List[Dict]
 
 
 class QuestionRequest(BaseModel):
@@ -102,12 +113,16 @@ async def root():
     )
 
 
-@app.post("/crawl", response_model=StatusResponse)
+@app.post("/crawl", response_model=CrawlResponse)
 async def crawl_website(request: CrawlRequest):
     """Crawl a website and add content to the knowledge base."""
     try:
-        # Initialize components
-        crawler = WebCrawler(request.url)
+        # Initialize crawler with enhanced settings
+        crawler = WebCrawler(
+            base_url=request.url,
+            delay=request.delay,
+            max_depth=request.max_depth
+        )
         text_extractor = TextExtractor()
         chunker = TextChunker()
         embedder = Embedder(
@@ -115,22 +130,27 @@ async def crawl_website(request: CrawlRequest):
             model_name=settings.EMBEDDING_MODEL_NAME
         )
         
-        # Crawl website
+        # Crawl website with enhanced functionality
         crawled_pages = crawler.crawl_site(max_pages=request.max_pages)
         if not crawled_pages:
             raise HTTPException(status_code=400, detail="Failed to crawl any pages")
         
         # Process each page
         all_chunks = []
-        for url, html_content in crawled_pages:
-            # Extract text
-            text = text_extractor.extract_text(html_content)
+        for page in crawled_pages:
+            # Extract text from HTML
+            text = text_extractor.extract_text(page.html_content)
             if not text:
                 continue
             
-            # Extract metadata
-            metadata = text_extractor.extract_metadata(html_content)
-            metadata['source_url'] = url
+            # Extract metadata including title
+            metadata = text_extractor.extract_metadata(page.html_content)
+            metadata.update({
+                'source_url': page.url,
+                'page_title': page.title,
+                'crawl_timestamp': page.crawl_timestamp,
+                'status_code': page.status_code
+            })
             
             # Chunk text
             chunks = chunker.chunk_text(text, metadata)
@@ -150,14 +170,28 @@ async def crawl_website(request: CrawlRequest):
         # Save database
         retriever.vector_db.save()
         
-        return StatusResponse(
-            status="success",
-            message=f"Successfully crawled and processed {len(crawled_pages)} pages, created {len(chunks_with_embeddings)} chunks",
-            stats={
-                'pages_crawled': len(crawled_pages),
-                'chunks_created': len(chunks_with_embeddings),
-                'total_chunks_in_db': retriever.vector_db.get_stats()['total_vectors']
+        # Get crawl statistics
+        stats = crawler.get_crawl_stats(crawled_pages)
+        
+        # Prepare response
+        page_summaries = [
+            {
+                'url': page.url,
+                'title': page.title,
+                'status_code': page.status_code,
+                'content_size': len(page.html_content),
+                'timestamp': page.crawl_timestamp
             }
+            for page in crawled_pages
+        ]
+        
+        return CrawlResponse(
+            status="success",
+            message=f"Successfully crawled {len(crawled_pages)} pages from {stats['base_domain']}",
+            crawled_pages=len(crawled_pages),
+            base_domain=stats['base_domain'],
+            total_content_size=stats['total_content_size'],
+            pages=page_summaries
         )
         
     except HTTPException:
@@ -228,6 +262,53 @@ async def get_status():
     except Exception as e:
         logger.error(f"Status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+
+@app.post("/test-crawl", response_model=CrawlResponse)
+async def test_crawl_website(request: CrawlRequest):
+    """Test crawl a website and return crawled URLs without processing content."""
+    try:
+        # Initialize crawler
+        crawler = WebCrawler(
+            base_url=request.url,
+            delay=request.delay,
+            max_depth=request.max_depth
+        )
+        
+        # Crawl website
+        crawled_pages = crawler.crawl_site(max_pages=request.max_pages)
+        if not crawled_pages:
+            raise HTTPException(status_code=400, detail="Failed to crawl any pages")
+        
+        # Get crawl statistics
+        stats = crawler.get_crawl_stats(crawled_pages)
+        
+        # Prepare response with page summaries
+        page_summaries = [
+            {
+                'url': page.url,
+                'title': page.title,
+                'status_code': page.status_code,
+                'content_size': len(page.html_content),
+                'timestamp': page.crawl_timestamp
+            }
+            for page in crawled_pages
+        ]
+        
+        return CrawlResponse(
+            status="success",
+            message=f"Test crawl completed. Found {len(crawled_pages)} pages on {stats['base_domain']}",
+            crawled_pages=len(crawled_pages),
+            base_domain=stats['base_domain'],
+            total_content_size=stats['total_content_size'],
+            pages=page_summaries
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test crawling failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Test crawling failed: {str(e)}")
 
 
 @app.delete("/clear", response_model=StatusResponse)

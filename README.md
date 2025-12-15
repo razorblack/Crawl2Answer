@@ -161,6 +161,42 @@ CHUNK_OVERLAP=200
 API_PORT=8000
 ```
 
+## 🧪 Testing the Crawler
+
+After setting up the environment, you can test the enhanced crawler:
+
+### Option 1: Test Script
+```bash
+python test_crawler_simple.py
+```
+
+### Option 2: API Testing
+1. Start the API server:
+   ```bash
+   python -m uvicorn api.main:app --reload
+   ```
+
+2. Test the crawler endpoint:
+   ```bash
+   curl -X POST "http://localhost:8000/test-crawl" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "url": "https://docs.python.org/3/tutorial/",
+       "max_pages": 5,
+       "max_depth": 2,
+       "delay": 1.0
+     }'
+   ```
+
+### Crawler Features Tested
+
+- ✅ **Domain Restriction**: Only crawls internal links from the same domain
+- ✅ **Smart Filtering**: Skips login pages, PDFs, APIs, and other non-content URLs  
+- ✅ **Depth Control**: Limits crawling depth to prevent infinite loops
+- ✅ **Rate Limiting**: Configurable delay between requests
+- ✅ **Page Data**: Stores URL, title, HTML content, and metadata for each page
+- ✅ **Link Extraction**: Finds and follows internal links automatically
+
 ## 📖 Usage
 
 ### 1. Start the API Server
@@ -170,16 +206,38 @@ After running the setup script, the API will be available at:
 - **Documentation:** http://localhost:8000/docs
 - **Alternative Documentation:** http://localhost:8000/redoc
 
-### 2. Crawl a Website
+### 2. Crawl a Website (Enhanced)
 
 ```bash
 curl -X POST "http://localhost:8000/crawl" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://docs.python.org/3/",
-    "max_pages": 5
+    "url": "https://docs.python.org/3/tutorial/",
+    "max_pages": 8,
+    "max_depth": 2,
+    "delay": 1.0
   }'
 ```
+
+**Response includes:**
+- List of crawled URLs with titles
+- Domain information and statistics  
+- Content size and crawling metadata
+- Total pages processed and chunked
+
+### 2a. Test Crawl (No Processing)
+
+```bash
+curl -X POST "http://localhost:8000/test-crawl" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.python.org/3/tutorial/",
+    "max_pages": 5,
+    "max_depth": 2
+  }'
+```
+
+This endpoint only crawls and returns URLs without processing content.
 
 ### 3. Ask Questions
 
@@ -203,7 +261,8 @@ curl http://localhost:8000/status
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/` | System information and stats |
-| POST | `/crawl` | Crawl a website and add to knowledge base |
+| POST | `/crawl` | Crawl website and add to knowledge base (enhanced with depth control) |
+| POST | `/test-crawl` | Test crawl website and return URLs only (no content processing) |
 | POST | `/ask` | Ask a question and get an answer |
 | GET | `/status` | Get system status and statistics |
 | DELETE | `/clear` | Clear the knowledge base |

@@ -30,6 +30,7 @@ class Settings:
         self.BASE_URL = os.getenv("BASE_URL", "")
         self.CRAWL_DELAY = float(os.getenv("CRAWL_DELAY", "1.0"))
         self.MAX_PAGES = int(os.getenv("MAX_PAGES", "10"))
+        self.MAX_DEPTH = int(os.getenv("MAX_DEPTH", "3"))
         self.REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
         
         # Text processing configuration
