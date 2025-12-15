@@ -12,7 +12,7 @@ from pathlib import Path
 # Import our modules
 from crawling.crawler import WebCrawler
 from extraction.text_extractor import TextExtractor
-from chunking.chunker import TextChunker
+from chunking.chunker import TextChunker, TextChunk
 from embeddings.embedder import Embedder
 from vector_store.vector_db import VectorDatabase
 from retrieval.retriever import Retriever
@@ -67,11 +67,25 @@ class TextExtractionResponse(BaseModel):
     metadata: Dict
 
 
+class ChunkingRequest(BaseModel):
+    url: str
+    strategy: str = "smart"  # Options: smart, fixed, sentence, paragraph
+    delay: float = 1.0
+
+
+class ChunkingResponse(BaseModel):
+    status: str
+    message: str
+    url: str
+    title: str
+    original_word_count: int
+    total_chunks: int
+    strategy_used: str
+    chunk_stats: Dict
+    chunks_preview: List[Dict]
+
+
 class AnswerResponse(BaseModel):
-    question: str
-    answer: str
-    sources: List[Dict]
-    confidence: float
     question: str
     answer: str
     sources: List[Dict]
@@ -387,6 +401,78 @@ async def test_text_extraction(request: CrawlRequest):
     except Exception as e:
         logger.error(f"Text extraction test failed: {e}")
         raise HTTPException(status_code=500, detail=f"Text extraction test failed: {str(e)}")
+
+
+@app.post("/test-chunking", response_model=ChunkingResponse)
+async def test_text_chunking(request: ChunkingRequest):
+    """Test text chunking on a single page with different strategies."""
+    try:
+        # Initialize components
+        crawler = WebCrawler(
+            base_url=request.url,
+            delay=request.delay,
+            max_depth=1  # Only fetch the single page
+        )
+        text_extractor = TextExtractor()
+        chunker = TextChunker()
+        
+        # Fetch and extract text from the page
+        page = crawler.fetch_page(request.url)
+        if not page:
+            raise HTTPException(status_code=400, detail="Failed to fetch the page")
+        
+        # Extract clean text
+        cleaned_content = text_extractor.extract_clean_text(
+            html_content=page.content,
+            url=page.url,
+            title=page.title
+        )
+        
+        if not cleaned_content:
+            raise HTTPException(status_code=400, detail="Failed to extract text from page")
+        
+        # Chunk the content
+        chunks = chunker.chunk_content(cleaned_content, strategy=request.strategy)
+        
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Failed to generate chunks from content")
+        
+        # Generate chunk statistics
+        chunk_stats = chunker.get_chunking_stats(chunks)
+        
+        # Create preview of first few chunks
+        chunks_preview = []
+        for i, chunk in enumerate(chunks[:5]):  # Show first 5 chunks
+            preview_content = chunk.content
+            if len(preview_content) > 200:
+                preview_content = preview_content[:200] + "..."
+            
+            chunks_preview.append({
+                "chunk_id": chunk.chunk_id,
+                "word_count": chunk.word_count,
+                "char_count": chunk.chunk_size,
+                "content_preview": preview_content,
+                "start_pos": chunk.start_pos,
+                "end_pos": chunk.end_pos
+            })
+        
+        return ChunkingResponse(
+            status="success",
+            message=f"Successfully chunked content using {request.strategy} strategy",
+            url=cleaned_content.url,
+            title=cleaned_content.title,
+            original_word_count=len(cleaned_content.content.split()),
+            total_chunks=len(chunks),
+            strategy_used=request.strategy,
+            chunk_stats=chunk_stats,
+            chunks_preview=chunks_preview
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Text chunking test failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Text chunking test failed: {str(e)}")
 
 
 @app.delete("/clear", response_model=StatusResponse)

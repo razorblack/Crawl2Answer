@@ -8,6 +8,10 @@ import sys
 import asyncio
 from typing import List
 import json
+import os
+
+# Add parent directory to Python path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
     from crawling.crawler import WebCrawler

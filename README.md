@@ -161,13 +161,23 @@ CHUNK_OVERLAP=200
 API_PORT=8000
 ```
 
-## 🧪 Testing the Crawler
+## 🧪 Testing
 
-After setting up the environment, you can test the enhanced crawler:
+After setting up the environment, you can test the various components:
 
-### Option 1: Test Script
+### Option 1: Test Scripts
 ```bash
-python test_crawler_simple.py
+# Test crawler functionality
+python tests/test_crawler_simple.py
+
+# Test text extraction  
+python tests/test_text_extraction.py
+
+# Test text chunking
+python tests/test_chunking_demo.py
+
+# Test full pipeline
+python tests/test_full_pipeline.py
 ```
 
 ### Option 2: API Testing
@@ -176,8 +186,9 @@ python test_crawler_simple.py
    python -m uvicorn api.main:app --reload
    ```
 
-2. Test the crawler endpoint:
+2. Test individual endpoints:
    ```bash
+   # Test crawler
    curl -X POST "http://localhost:8000/test-crawl" \
      -H "Content-Type: application/json" \
      -d '{
@@ -186,10 +197,28 @@ python test_crawler_simple.py
        "max_depth": 2,
        "delay": 1.0
      }'
-   ```
+   
+   # Test text extraction
+   curl -X POST "http://localhost:8000/test-extraction" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "url": "https://docs.python.org/3/tutorial/introduction.html",
+       "delay": 1.0
+     }'
+   
+   # Test text chunking
+   curl -X POST "http://localhost:8000/test-chunking" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "url": "https://docs.python.org/3/tutorial/introduction.html",
+       "strategy": "smart",
+       "delay": 1.0
+     }'
+```
 
-### Crawler Features Tested
+### Features Tested
 
+#### Crawler Features
 - ✅ **Domain Restriction**: Only crawls internal links from the same domain
 - ✅ **Smart Filtering**: Skips login pages, PDFs, APIs, and other non-content URLs  
 - ✅ **Depth Control**: Limits crawling depth to prevent infinite loops
@@ -197,8 +226,7 @@ python test_crawler_simple.py
 - ✅ **Page Data**: Stores URL, title, HTML content, and metadata for each page
 - ✅ **Link Extraction**: Finds and follows internal links automatically
 
-### Text Extraction Features Tested
-
+#### Text Extraction Features
 - ✅ **HTML Parsing**: Robust parsing with BeautifulSoup
 - ✅ **Content Cleaning**: Removes navbars, footers, scripts, ads, cookie banners
 - ✅ **Smart Detection**: Identifies main content areas automatically
@@ -206,20 +234,13 @@ python test_crawler_simple.py
 - ✅ **Rich Metadata**: Extracts titles, descriptions, headings, and statistics
 - ✅ **Structured Output**: Type-safe data structures with comprehensive information
 
-### Option 3: Test Text Extraction
-```bash
-python test_text_extraction.py
-```
-
-### Option 4: API Text Extraction Testing
-```bash
-curl -X POST "http://localhost:8000/test-extraction" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://docs.python.org/3/tutorial/introduction.html",
-    "delay": 1.0
-  }'
-```
+#### Text Chunking Features
+- ✅ **Multiple Strategies**: Smart, fixed, sentence, and paragraph-based chunking
+- ✅ **Boundary Detection**: Respects sentence and paragraph boundaries
+- ✅ **Configurable Overlap**: Maintains context between chunks
+- ✅ **Quality Filtering**: Removes low-quality chunks automatically
+- ✅ **Statistical Analysis**: Provides comprehensive chunking metrics
+- ✅ **Metadata Preservation**: Maintains source information and context
 
 ## 📖 Usage
 
