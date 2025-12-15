@@ -1,21 +1,25 @@
 """
 FastAPI application for the Crawl2Answer Q&A bot.
+Step 7: REST API endpoints using enhanced components from Steps 1-6.
 """
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import logging
 import os
+import asyncio
+import time
 from pathlib import Path
 
-# Import our modules
+# Import our enhanced modules
 from crawling.crawler import WebCrawler
-from extraction.text_extractor import TextExtractor
+from extraction.text_extractor import TextExtractor  
 from chunking.chunker import TextChunker
-from embeddings.embedder import Embedder
+from embeddings.embedder_enhanced import Embedder
 from vector_store.vector_db import VectorDatabase
-from retrieval.retriever import Retriever
+from retrieval.retriever_enhanced import DocumentRetriever
+from generation.answer_generator import AnswerGenerator
 from config.settings import Settings
 
 # Configure logging
@@ -25,31 +29,46 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="Crawl2Answer API",
-    description="Q&A bot using Retrieval Augmented Generation (RAG)",
-    version="1.0.0"
+    description="Advanced Q&A bot using Retrieval Augmented Generation (RAG) with Steps 1-6 integration",
+    version="2.0.0"
 )
 
 # Global components (will be initialized on startup)
 settings = None
 retriever = None
+answer_generator = None
 
 
 # Pydantic models for API requests/responses
 class CrawlRequest(BaseModel):
-    url: str
+    baseUrl: str  # Changed from 'url' to match Step 7 requirements
     max_pages: int = 10
+    max_depth: int = 3
+    delay: float = 1.0
+
+
+class CrawlResponse(BaseModel):
+    status: str
+    message: str
+    pages_crawled: int
+    chunks_created: int
+    embeddings_generated: int
+    database_updated: bool
+    processing_time: float
+    base_url: str
 
 
 class QuestionRequest(BaseModel):
-    question: str
-    max_results: int = 5
+    question: str  # Main input for /ask endpoint
 
 
 class AnswerResponse(BaseModel):
     question: str
     answer: str
-    sources: List[Dict]
+    sources: List[str]  # List of source URLs as required
     confidence: float
+    retrieval_time: float
+    generation_time: float
 
 
 class StatusResponse(BaseModel):
@@ -61,31 +80,24 @@ class StatusResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup."""
-    global settings, retriever
+    global settings, retriever, answer_generator
     
     try:
         # Load settings
         settings = Settings()
+        logger.info("Settings loaded successfully")
         
-        # Initialize embedder
-        embedder = Embedder(
-            model_type=settings.EMBEDDING_MODEL_TYPE,
-            model_name=settings.EMBEDDING_MODEL_NAME
-        )
+        # Initialize enhanced components
+        retriever = DocumentRetriever(settings)
+        answer_generator = AnswerGenerator(retriever, settings)
         
-        # Initialize vector database
-        vector_db = VectorDatabase(
-            dimension=embedder.get_embedding_dimension(),
-            storage_path=settings.VECTOR_DB_PATH
-        )
+        # Check system health
+        retriever_health = retriever.health_check()
+        generator_health = answer_generator.health_check()
         
-        # Load existing database
-        vector_db.load()
-        
-        # Initialize retriever
-        retriever = Retriever(embedder, vector_db)
-        
-        logger.info("Crawl2Answer API started successfully")
+        logger.info(f"Retriever health: {retriever_health}")
+        logger.info(f"Answer generator health: {generator_health}")
+        logger.info("Crawl2Answer API started successfully with enhanced Step 6 components")
         
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")
@@ -102,108 +114,221 @@ async def root():
     )
 
 
-@app.post("/crawl", response_model=StatusResponse)
+@app.post("/crawl", response_model=CrawlResponse)
 async def crawl_website(request: CrawlRequest):
-    """Crawl a website and add content to the knowledge base."""
+    """
+    Step 7 Implementation: POST /crawl endpoint
+    
+    Actions:
+    1. Run crawling
+    2. Run extraction  
+    3. Run chunking
+    4. Run embeddings
+    5. Index everything in the vector store
+    
+    Output: Success message with processing statistics
+    """
+    start_time = time.time()
+    
     try:
-        # Initialize components
-        crawler = WebCrawler(request.url)
-        text_extractor = TextExtractor()
-        chunker = TextChunker()
-        embedder = Embedder(
-            model_type=settings.EMBEDDING_MODEL_TYPE,
-            model_name=settings.EMBEDDING_MODEL_NAME
+        logger.info(f"Starting crawl process for: {request.baseUrl}")
+        
+        # Step 1: Initialize crawler  
+        crawler = WebCrawler(
+            base_url=request.baseUrl,
+            max_pages=request.max_pages,
+            max_depth=request.max_depth,
+            delay=request.delay
         )
         
-        # Crawl website
-        crawled_pages = crawler.crawl_site(max_pages=request.max_pages)
+        # Step 2: Crawl website
+        logger.info("Step 1: Running crawling...")
+        crawled_pages = await asyncio.to_thread(
+            crawler.crawl_site, 
+            max_pages=request.max_pages
+        )
+        
         if not crawled_pages:
             raise HTTPException(status_code=400, detail="Failed to crawl any pages")
         
-        # Process each page
+        logger.info(f"Crawled {len(crawled_pages)} pages")
+        
+        # Step 3: Initialize text extractor
+        text_extractor = TextExtractor()
+        
+        # Step 4: Extract and chunk text
+        logger.info("Step 2: Running extraction...")
+        logger.info("Step 3: Running chunking...")
+        
         all_chunks = []
-        for url, html_content in crawled_pages:
-            # Extract text
-            text = text_extractor.extract_text(html_content)
-            if not text:
+        chunker = TextChunker()
+        
+        for page_data in crawled_pages:
+            # Extract clean text
+            extracted_content = await asyncio.to_thread(
+                text_extractor.extract_text,
+                page_data.html_content,
+                page_data.url,
+                page_data.title
+            )
+            
+            if not extracted_content:
+                logger.warning(f"Failed to extract text from {page_data.url}")
                 continue
             
-            # Extract metadata
-            metadata = text_extractor.extract_metadata(html_content)
-            metadata['source_url'] = url
+            # Prepare metadata
+            metadata = {
+                'source_url': page_data.url,
+                'title': extracted_content.title,
+                'crawl_timestamp': page_data.crawl_timestamp,
+                'status_code': page_data.status_code,
+                **extracted_content.metadata
+            }
             
-            # Chunk text
-            chunks = chunker.chunk_text(text, metadata)
+            # Generate chunks
+            chunks = await asyncio.to_thread(
+                chunker.chunk_text,
+                extracted_content.cleaned_text,
+                metadata
+            )
+            
             all_chunks.extend(chunks)
         
         if not all_chunks:
-            raise HTTPException(status_code=400, detail="No text content extracted")
+            raise HTTPException(status_code=400, detail="No text chunks generated")
         
-        # Generate embeddings
-        chunks_with_embeddings = embedder.embed_chunks(all_chunks)
+        logger.info(f"Generated {len(all_chunks)} text chunks")
         
-        # Add to vector database
-        success = retriever.vector_db.add_embeddings(chunks_with_embeddings)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to add embeddings to database")
+        # Step 5: Generate embeddings and index in vector store
+        logger.info("Step 4: Running embeddings...")
+        embedder = Embedder(settings)
         
-        # Save database
-        retriever.vector_db.save()
+        # Generate embeddings for chunks
+        embeddings_results = []
+        for chunk in all_chunks:
+            embedding_result = await asyncio.to_thread(
+                embedder.generate_embedding,
+                chunk.content
+            )
+            
+            if embedding_result:
+                embeddings_results.append({
+                    'embedding': embedding_result.embedding,
+                    'chunk_id': chunk.chunk_id,
+                    'content': chunk.content,
+                    'metadata': chunk.metadata
+                })
         
-        return StatusResponse(
+        if not embeddings_results:
+            raise HTTPException(status_code=500, detail="Failed to generate embeddings")
+        
+        logger.info(f"Generated {len(embeddings_results)} embeddings")
+        
+        # Step 6: Index in vector store
+        logger.info("Step 5: Indexing in vector store...")
+        
+        # Add embeddings to vector database through retriever
+        vector_db = retriever.vector_db
+        
+        for embedding_data in embeddings_results:
+            success = vector_db.add_embedding(
+                embedding=embedding_data['embedding'],
+                metadata=embedding_data['metadata'],
+                content=embedding_data['content']
+            )
+            
+            if not success:
+                logger.warning(f"Failed to add embedding for chunk {embedding_data['chunk_id']}")
+        
+        # Save the updated database
+        save_success = vector_db.save()
+        
+        processing_time = time.time() - start_time
+        
+        logger.info(f"Crawl process completed in {processing_time:.2f} seconds")
+        
+        return CrawlResponse(
             status="success",
-            message=f"Successfully crawled and processed {len(crawled_pages)} pages, created {len(chunks_with_embeddings)} chunks",
-            stats={
-                'pages_crawled': len(crawled_pages),
-                'chunks_created': len(chunks_with_embeddings),
-                'total_chunks_in_db': retriever.vector_db.get_stats()['total_vectors']
-            }
+            message=f"Successfully processed {len(crawled_pages)} pages from {request.baseUrl}",
+            pages_crawled=len(crawled_pages),
+            chunks_created=len(all_chunks),
+            embeddings_generated=len(embeddings_results),
+            database_updated=save_success,
+            processing_time=processing_time,
+            base_url=request.baseUrl
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Crawling failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Crawling failed: {str(e)}")
+        logger.error(f"Crawl process failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Crawl process failed: {str(e)}")
 
 
 @app.post("/ask", response_model=AnswerResponse)
 async def ask_question(request: QuestionRequest):
-    """Ask a question and get an answer based on retrieved content."""
+    """
+    Step 7 Implementation: POST /ask endpoint
+    
+    Actions:
+    1. Run retrieval
+    2. Generate final answer
+    
+    Output: answer text and source URLs
+    """
+    start_retrieval = time.time()
+    
     try:
-        # Retrieve relevant content
-        relevant_chunks = retriever.retrieve(
-            request.question, 
-            k=request.max_results
+        logger.info(f"Processing question: {request.question}")
+        
+        # Step 1: Run retrieval
+        logger.info("Running retrieval...")
+        retrieval_result = await asyncio.to_thread(
+            retriever.retrieve,
+            request.question,
+            top_k=5,
+            similarity_threshold=0.1
         )
         
-        if not relevant_chunks:
+        retrieval_time = time.time() - start_retrieval
+        
+        if retrieval_result.total_chunks == 0:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail="No relevant content found for this question"
             )
         
-        # Generate answer from retrieved content
-        answer = _generate_answer(request.question, relevant_chunks)
+        logger.info(f"Retrieved {retrieval_result.total_chunks} relevant chunks")
         
-        # Calculate confidence (average similarity score)
-        confidence = sum(chunk.get('similarity_score', 0) for chunk in relevant_chunks) / len(relevant_chunks)
+        # Step 2: Generate final answer
+        logger.info("Generating answer...")
+        start_generation = time.time()
         
-        # Prepare sources
-        sources = [
-            {
-                'content': chunk['content'][:200] + "..." if len(chunk['content']) > 200 else chunk['content'],
-                'source_url': chunk.get('metadata', {}).get('source_url', 'unknown'),
-                'similarity_score': chunk.get('similarity_score', 0)
-            }
-            for chunk in relevant_chunks
-        ]
+        answer_result = await asyncio.to_thread(
+            answer_generator.generate_answer,
+            request.question
+        )
+        
+        generation_time = time.time() - start_generation
+        
+        if not answer_result or not answer_result.answer:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate answer"
+            )
+        
+        # Extract unique source URLs
+        source_urls = list(set(answer_result.sources))
+        
+        logger.info(f"Generated answer with confidence {answer_result.confidence:.3f}")
         
         return AnswerResponse(
             question=request.question,
-            answer=answer,
-            sources=sources,
-            confidence=confidence
+            answer=answer_result.answer,
+            sources=source_urls,
+            confidence=answer_result.confidence,
+            retrieval_time=retrieval_time,
+            generation_time=generation_time
         )
         
     except HTTPException:
@@ -213,15 +338,23 @@ async def ask_question(request: QuestionRequest):
         raise HTTPException(status_code=500, detail=f"Question answering failed: {str(e)}")
 
 
-@app.get("/status", response_model=StatusResponse)
-async def get_status():
-    """Get system status and statistics."""
+@app.get("/", response_model=StatusResponse)
+async def root():
+    """Root endpoint with API information."""
     try:
-        stats = retriever.get_retrieval_stats() if retriever else {}
+        # Get system health information
+        retriever_health = retriever.health_check() if retriever else {}
+        generator_health = answer_generator.health_check() if answer_generator else {}
+        
+        stats = {
+            "retriever": retriever_health,
+            "generator": generator_health,
+            "database_info": retriever.get_database_info() if retriever else {}
+        }
         
         return StatusResponse(
-            status="healthy",
-            message="System is operational",
+            status="running",
+            message="Crawl2Answer API v2.0 is running with enhanced Step 6 components",
             stats=stats
         )
         
@@ -230,58 +363,10 @@ async def get_status():
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
 
-@app.delete("/clear", response_model=StatusResponse)
-async def clear_database():
-    """Clear all data from the knowledge base."""
-    try:
-        success = retriever.vector_db.clear()
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to clear database")
-        
-        return StatusResponse(
-            status="success",
-            message="Knowledge base cleared successfully"
-        )
-        
-    except Exception as e:
-        logger.error(f"Database clearing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Database clearing failed: {str(e)}")
-
-
-def _generate_answer(question: str, relevant_chunks: List[Dict]) -> str:
-    """
-    Generate an answer based on retrieved content.
-    This is a simple implementation that concatenates relevant content.
-    In a real implementation, you might use a language model to generate more coherent answers.
-    
-    Args:
-        question: The user's question
-        relevant_chunks: List of relevant content chunks
-        
-    Returns:
-        Generated answer string
-    """
-    if not relevant_chunks:
-        return "I couldn't find any relevant information to answer your question."
-    
-    # Simple approach: concatenate relevant content
-    answer_parts = []
-    answer_parts.append("Based on the available information:")
-    answer_parts.append("")
-    
-    for i, chunk in enumerate(relevant_chunks[:3], 1):  # Use top 3 chunks
-        content = chunk['content']
-        source_url = chunk.get('metadata', {}).get('source_url', 'unknown source')
-        
-        # Truncate very long content
-        if len(content) > 500:
-            content = content[:497] + "..."
-        
-        answer_parts.append(f"{i}. {content}")
-        answer_parts.append(f"   (Source: {source_url})")
-        answer_parts.append("")
-    
-    return "\n".join(answer_parts)
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint."""
+    return {"status": "healthy", "message": "API is running"}
 
 
 if __name__ == "__main__":

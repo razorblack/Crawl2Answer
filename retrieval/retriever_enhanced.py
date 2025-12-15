@@ -198,10 +198,7 @@ class DocumentRetriever:
     def _embed_query(self, query: str) -> Optional[EmbeddingResult]:
         """Generate embedding for user query"""
         try:
-            embedding_result = self.embedder.generate_embedding(
-                text=query,
-                metadata={"type": "query", "timestamp": time.time()}
-            )
+            embedding_result = self.embedder.generate_embedding(text=query)
             
             if embedding_result:
                 logger.debug(f"Generated query embedding (dim: {embedding_result.dimension})")
@@ -213,90 +210,153 @@ class DocumentRetriever:
         except Exception as e:
             logger.error(f"Query embedding failed: {e}")
             return None
-            
-            # Search vector database
-            results = self.vector_db.search(
-                query_embedding, 
-                k=k, 
-                score_threshold=score_threshold
+    
+    def _search_similar_chunks(
+        self, 
+        query_embedding: EmbeddingResult, 
+        top_k: int,
+        filter_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[SearchResult]:
+        """Search for similar chunks in vector database"""
+        try:
+            # Perform similarity search
+            search_results = self.vector_db.search(
+                query_vector=query_embedding.embedding,
+                top_k=top_k,
+                filter_metadata=filter_metadata
             )
             
-            # Post-process results
-            processed_results = self._post_process_results(results, query)
-            
-            logger.info(f"Retrieved {len(processed_results)} relevant chunks for query: {query[:50]}...")
-            return processed_results
+            logger.debug(f"Vector search returned {len(search_results)} results")
+            return search_results
             
         except Exception as e:
-            logger.error(f"Retrieval failed: {e}")
+            logger.error(f"Vector search failed: {e}")
             return []
     
-    def _post_process_results(self, results: List[Dict], query: str) -> List[Dict]:
+    def _empty_result(self, query: str, start_time: float) -> RetrievalResult:
+        """Create empty result for failed retrievals"""
+        retrieval_time = time.time() - start_time
+        return RetrievalResult(
+            query=query,
+            chunks=[],
+            sources=[],
+            relevance_scores=[],
+            retrieval_time=retrieval_time,
+            total_chunks=0
+        )
+    
+    def get_database_info(self) -> Dict[str, Any]:
+        """Get information about the vector database"""
+        try:
+            stats = self.vector_db.get_stats()
+            return {
+                "total_documents": stats.total_vectors,
+                "embedding_dimension": stats.embedding_dimension,
+                "index_type": stats.index_type,
+                "storage_size_mb": stats.total_size_mb,
+                "last_updated": stats.last_updated
+            }
+        except Exception as e:
+            logger.error(f"Failed to get database info: {e}")
+            return {"error": str(e)}
+    
+    def get_retrieval_stats(self) -> Dict[str, Any]:
+        """Get retrieval performance statistics"""
+        return {
+            **self.retrieval_stats,
+            "database_info": self.get_database_info()
+        }
+    
+    def search_by_source(self, source_filter: str, query: str, top_k: int = 3) -> RetrievalResult:
         """
-        Post-process search results to improve relevance.
+        Search within documents from a specific source
         
         Args:
-            results: Raw search results
-            query: Original query
+            source_filter: Source URL or pattern to filter by
+            query: Search query
+            top_k: Number of results to return
             
         Returns:
-            Processed results
+            RetrievalResult filtered by source
         """
-        if not results:
-            return results
+        logger.info(f"Source-filtered search: '{source_filter}' for query: '{query}'")
         
-        # Add query context
-        for result in results:
-            result['query'] = query
-            result['retrieval_timestamp'] = self._get_timestamp()
-        
-        # Sort by similarity score (descending)
-        results.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
-        
-        return results
+        return self.retrieve(
+            query=query,
+            top_k=top_k,
+            filter_metadata={"source": source_filter}
+        )
     
-    def _get_timestamp(self) -> str:
-        """Get current timestamp as string."""
-        from datetime import datetime
-        return datetime.now().isoformat()
-    
-    def retrieve_with_context(self, query: str, k: int = 5, 
-                             context_window: int = 2) -> List[Dict]:
+    def health_check(self) -> Dict[str, Any]:
         """
-        Retrieve relevant chunks with additional context from neighboring chunks.
+        Perform health check on retrieval system
+        
+        Returns:
+            Health status information
+        """
+        health = {
+            "embedder_ready": False,
+            "vector_db_ready": False,
+            "total_documents": 0,
+            "test_query_success": False
+        }
+        
+        try:
+            # Check embedder
+            test_embedding = self.embedder.generate_embedding("test")
+            health["embedder_ready"] = test_embedding is not None
+            
+            # Check vector database
+            stats = self.vector_db.get_stats()
+            health["vector_db_ready"] = stats.total_vectors > 0
+            health["total_documents"] = stats.total_vectors
+            
+            # Test retrieval
+            if health["embedder_ready"] and health["vector_db_ready"]:
+                test_result = self.retrieve("test query", top_k=1)
+                health["test_query_success"] = test_result.total_chunks >= 0
+                
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            health["error"] = str(e)
+        
+        return health
+
+
+# Legacy compatibility class
+class Retriever(DocumentRetriever):
+    """Legacy compatibility wrapper for DocumentRetriever"""
+    
+    def __init__(self, embedder=None, vector_db=None, settings: Optional[Settings] = None):
+        """
+        Initialize with legacy interface support
+        
+        Args:
+            embedder: Legacy embedder (ignored, uses enhanced version)
+            vector_db: Legacy vector_db (ignored, uses enhanced version)
+            settings: Configuration settings
+        """
+        # Initialize enhanced version
+        super().__init__(settings)
+        
+    def retrieve(self, query: str, k: int = 5, score_threshold: float = 0.1) -> List[Dict]:
+        """
+        Legacy retrieve method for backward compatibility
         
         Args:
             query: User query
-            k: Number of top results to retrieve
-            context_window: Number of neighboring chunks to include as context
+            k: Number of results
+            score_threshold: Minimum score threshold
             
         Returns:
-            List of relevant chunks with expanded context
+            List of chunks (legacy format)
         """
-        # Get initial results
-        results = self.retrieve(query, k)
+        # Use enhanced retrieval
+        result = super().retrieve(
+            query=query,
+            top_k=k,
+            similarity_threshold=score_threshold
+        )
         
-        # This would require more sophisticated chunk tracking
-        # For now, return regular results
-        # TODO: Implement context window expansion
-        
-        return results
-    
-    def get_retrieval_stats(self) -> Dict:
-        """
-        Get retrieval statistics.
-        
-        Returns:
-            Dictionary with retrieval statistics
-        """
-        db_stats = self.vector_db.get_stats()
-        embedder_info = {
-            'model_type': self.embedder.model_type,
-            'model_name': self.embedder.model_name,
-            'embedding_dimension': self.embedder.get_embedding_dimension()
-        }
-        
-        return {
-            'vector_database': db_stats,
-            'embedder': embedder_info
-        }
+        # Return in legacy format
+        return result.chunks
