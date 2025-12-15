@@ -56,7 +56,22 @@ class QuestionRequest(BaseModel):
     max_results: int = 5
 
 
+class TextExtractionResponse(BaseModel):
+    status: str
+    message: str
+    url: str
+    title: str
+    word_count: int
+    char_count: int
+    cleaned_text_preview: str
+    metadata: Dict
+
+
 class AnswerResponse(BaseModel):
+    question: str
+    answer: str
+    sources: List[Dict]
+    confidence: float
     question: str
     answer: str
     sources: List[Dict]
@@ -135,25 +150,34 @@ async def crawl_website(request: CrawlRequest):
         if not crawled_pages:
             raise HTTPException(status_code=400, detail="Failed to crawl any pages")
         
-        # Process each page
+        # Process each page with enhanced extraction
         all_chunks = []
         for page in crawled_pages:
-            # Extract text from HTML
-            text = text_extractor.extract_text(page.html_content)
-            if not text:
+            # Extract and clean text using enhanced extractor
+            cleaned_content = text_extractor.extract_text(
+                html_content=page.html_content,
+                url=page.url,
+                title=page.title
+            )
+            
+            if not cleaned_content:
+                logger.warning(f"Failed to extract text from {page.url}")
                 continue
             
-            # Extract metadata including title
-            metadata = text_extractor.extract_metadata(page.html_content)
+            # Use cleaned text and enhanced metadata
+            metadata = cleaned_content.metadata
             metadata.update({
                 'source_url': page.url,
-                'page_title': page.title,
+                'page_title': cleaned_content.title,
                 'crawl_timestamp': page.crawl_timestamp,
-                'status_code': page.status_code
+                'status_code': page.status_code,
+                'extraction_timestamp': cleaned_content.extraction_timestamp,
+                'word_count': cleaned_content.word_count,
+                'char_count': cleaned_content.char_count
             })
             
-            # Chunk text
-            chunks = chunker.chunk_text(text, metadata)
+            # Chunk the cleaned text
+            chunks = chunker.chunk_text(cleaned_content.cleaned_text, metadata)
             all_chunks.extend(chunks)
         
         if not all_chunks:
@@ -309,6 +333,60 @@ async def test_crawl_website(request: CrawlRequest):
     except Exception as e:
         logger.error(f"Test crawling failed: {e}")
         raise HTTPException(status_code=500, detail=f"Test crawling failed: {str(e)}")
+
+
+@app.post("/test-extraction", response_model=TextExtractionResponse)
+async def test_text_extraction(request: CrawlRequest):
+    """Test text extraction from a single page without storing in database."""
+    try:
+        # Initialize components
+        crawler = WebCrawler(
+            base_url=request.url,
+            delay=request.delay,
+            max_depth=1  # Only fetch the single page
+        )
+        text_extractor = TextExtractor()
+        
+        # Fetch just the single page
+        page = crawler.fetch_page(request.url)
+        if not page:
+            raise HTTPException(status_code=400, detail="Failed to fetch the page")
+        
+        # Extract and clean text
+        cleaned_content = text_extractor.extract_text(
+            html_content=page.html_content,
+            url=page.url,
+            title=page.title
+        )
+        
+        if not cleaned_content:
+            raise HTTPException(status_code=400, detail="Failed to extract text from page")
+        
+        # Log the cleaned content for testing
+        text_extractor.log_cleaned_content(cleaned_content)
+        
+        # Prepare preview (first 500 characters)
+        preview_length = 500
+        text_preview = cleaned_content.cleaned_text
+        if len(text_preview) > preview_length:
+            text_preview = text_preview[:preview_length] + "..."
+        
+        return TextExtractionResponse(
+            status="success",
+            message=f"Successfully extracted text from {page.url}",
+            url=cleaned_content.url,
+            title=cleaned_content.title,
+            word_count=cleaned_content.word_count,
+            char_count=cleaned_content.char_count,
+            cleaned_text_preview=text_preview,
+            metadata=cleaned_content.metadata
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Text extraction test failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Text extraction test failed: {str(e)}")
 
 
 @app.delete("/clear", response_model=StatusResponse)

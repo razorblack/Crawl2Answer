@@ -197,6 +197,30 @@ python test_crawler_simple.py
 - ✅ **Page Data**: Stores URL, title, HTML content, and metadata for each page
 - ✅ **Link Extraction**: Finds and follows internal links automatically
 
+### Text Extraction Features Tested
+
+- ✅ **HTML Parsing**: Robust parsing with BeautifulSoup
+- ✅ **Content Cleaning**: Removes navbars, footers, scripts, ads, cookie banners
+- ✅ **Smart Detection**: Identifies main content areas automatically
+- ✅ **Text Normalization**: Cleans whitespace, removes noise, filters quality
+- ✅ **Rich Metadata**: Extracts titles, descriptions, headings, and statistics
+- ✅ **Structured Output**: Type-safe data structures with comprehensive information
+
+### Option 3: Test Text Extraction
+```bash
+python test_text_extraction.py
+```
+
+### Option 4: API Text Extraction Testing
+```bash
+curl -X POST "http://localhost:8000/test-extraction" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.python.org/3/tutorial/introduction.html",
+    "delay": 1.0
+  }'
+```
+
 ## 📖 Usage
 
 ### 1. Start the API Server
@@ -225,7 +249,26 @@ curl -X POST "http://localhost:8000/crawl" \
 - Content size and crawling metadata
 - Total pages processed and chunked
 
-### 2a. Test Crawl (No Processing)
+### 2a. Test Text Extraction (Single Page)
+
+```bash
+curl -X POST "http://localhost:8000/test-extraction" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.python.org/3/tutorial/introduction.html",
+    "delay": 1.0
+  }'
+```
+
+**Features demonstrated:**
+- HTML parsing and content extraction
+- Removal of navigation, ads, and noise
+- Main content area detection  
+- Text cleaning and normalization
+- Rich metadata extraction
+- Content quality statistics
+
+### 2b. Test Crawl (No Processing)
 
 ```bash
 curl -X POST "http://localhost:8000/test-crawl" \
@@ -261,8 +304,9 @@ curl http://localhost:8000/status
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/` | System information and stats |
-| POST | `/crawl` | Crawl website and add to knowledge base (enhanced with depth control) |
+| POST | `/crawl` | Crawl website and add to knowledge base (with enhanced text extraction) |
 | POST | `/test-crawl` | Test crawl website and return URLs only (no content processing) |
+| POST | `/test-extraction` | Test text extraction from a single page (with cleaning preview) |
 | POST | `/ask` | Ask a question and get an answer |
 | GET | `/status` | Get system status and statistics |
 | DELETE | `/clear` | Clear the knowledge base |
